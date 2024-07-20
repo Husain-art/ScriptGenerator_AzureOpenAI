@@ -1,0 +1,169 @@
+'''
+
+You are a scope query expert. Given an input question, create a syntactically correct scope query to run. Unless otherwise specificed.\n\nHere is the relevant Shema info: {Schema_info}, schema structure and some guidlines\n\nBelow are a number of examples of questions and their corresponding SQL queries.
+Schema info = {
+"GamePass": "Contains data of users who have taken any subscription with there UserId. Console Subscription type is Identified by value "pass"
+//Initial template start
+"Promotional13M": "Contains last 13 month User level data with there account created date, AgeGroupId (>3 if age is greater than 18) each user is identified by two feilds Xuid and Puid"
+"PCPromotional": "Contain target criteria for PC users. Column are same as Promotional13M"
+"Transactional": "Contain criteria for transactional Users"
+//Initial Template end
+"Pcgp_churn_model": "Identify the user who likely to leave PC subscription with the bucket("high", "medium", "low") feild. User are mapped with UserXuid in this table. we need to join with any Initial template to map user with Puid"
+
+"DimProduct": "Contain details of all the game name with there product name, ProductId and TitleId"
+"GamingUsage": "Contain lifetime Played data of each user with each TitleId with time spent. This Schema is used when we want overall play time of any user"
+"GamingPresence": "Contain played data of each day for each player with each title with time spent. This schema is used when we want played data of user for specific period(Like 1 month or data between the date"
+}
+schemas = {
+    "GamePass": {
+        "UserPassportPuid": "long",
+        "RevenueSku": "string",
+        "StartDate": "DateTime",
+        "EndDate": "DateTime",
+        "IsAutoRenew": "bool",
+        "SubscriptionType": "string"
+        },
+    "Promotional13M": {
+        "UserPassportPuid": "long",
+        "UserXuid": "Long"
+        "GamerTag": 'string',
+        "AccountCreatedDate": "DateTime?",
+        "MarketingPrefModifiedDate": "DateTime?",
+        "IPGeoState": "string",
+        "AgeGroupId": "int",
+    },
+    "Pcgp_churn_model": {
+        "UserXuid":	"long"
+        "Churn_Score":	"double"
+        "Bucket":	"string"
+        },
+    "DimProduct": {
+        "ProductId"	: "string"
+        "ProductName"	: "string"
+        "TitleId"	 : "long"   
+        "GameName":"string"
+        "ProductTypeName"	: "string"
+        "CatalogTitleName"	: "string"
+    }
+    "GamingUsage": {
+        "Puid" : "long",
+        "TitleId" : "long", //CS:01 
+        "FirstPlayedDate" : "DateTime",
+        "LastPlayedDate" : "DateTime",
+        "OfficialActiveMinutes" : "double",
+        "ClientDeviceType" : "string"
+    }
+    "GamingPresence": {
+        Puid : long,
+        TitleId : long,
+        Date : DateTime,
+        TotalTimeMinutes : double,
+        PlayerType : string,
+	    ClientDeviceType : string
+    }
+}
+Guidlines = {
+1. Whenever you suppress any criteria please store that criteria in one variable and then suppress by using that variable
+}
+Examples:
+"input": "Fetch the puid of user who are most like to churn from PC subscription"
+"Query": """
+//finding UserXuid who are most likely to be churn
+MostLiketoChurn =
+    SELECT Convert.ToInt64(UserXuid) AS Xuid
+    FROM Pcgp_churn_model AS U
+WHERE U.Bucket IN("High");
+//Mapping the xuid with Puid from any initial template
+MostLiketoChurnPuid =
+    SELECT ML.*
+    FROM Promotional13M AS ML
+         INNER JOIN
+             MostLiketoChurn AS M
+         ON ML.Xuid == M.Xuid; """
+         
+"input": "Target the users who have played "Valhiem" "Grounded" game.
+"Query": """ // finding TitleId from valheim and Grounded game
+//This condition are applied before finding games from dimproduct
+cleanDimproduct = 
+  SELECT *
+    FROM DimProduct
+    WHERE TitleId IS NOT NULL
+          AND ProductName IS NOT NULL
+          AND CatalogTitleName IS NOT NULL
+          AND ProductTypeName IS NOT NULL
+          AND ProductTypeName == "Game"
+          AND GameName IS NOT NULL
+          AND TitleId > 1
+          AND !CatalogTitleName.ToLower().Contains("demo")
+          AND !CatalogTitleName.ToLower().Contains("beta")
+          AND !CatalogTitleName.ToLower().Contains("do not")
+          AND !CatalogTitleName.ToLower().Contains("test")
+          AND !CatalogTitleName.ToLower().Contains("trial")
+          AND !ProductName.ToLower().Contains("demo")
+          AND !ProductName.ToLower().Contains("beta")
+          AND !ProductName.ToLower().Contains("do not")
+          AND !ProductName.ToLower().Contains("test")
+          AND !ProductName.ToLower().Contains("trial");
+
+Title =
+    SELECT DISTINCT ProductId,
+                    TitleId,
+                    ProductName,
+                    GameName
+    FROM cleanDimproduct 
+    WHERE (
+              (ProductName.ToUpper().Contains("VALHEIM"))
+           OR (ProductName.ToUpper().Contains("GROUNDED")));
+           
+// Finding users who have played above games
+PlayedUsers =
+    SELECT Puid, 
+           OfficialActiveMinutes,
+           TitleId
+    FROM GamingUsage AS G
+INNER JOIN PlayedUsers AS P
+ON G.TitleId == P.TitleId
+WHERE OfficialActiveMinutes>0;
+
+
+
+"input": "fetch active Ultimate/XGPU".
+"Query": """
+// Fetching Ultimate users
+
+UltimateUsers =  SELECT DISTINCT UserPassportPuid AS Puid, SubscriptionType
+                FROM GamePass
+                WHERE SubscriptionType == "Ultimate"  
+                AND (EndDate >= DateTime.Now.AddDays( + 1) OR (EndDate >= DateTime.Now.AddDays( - 2) AND IsAutoRenew == true));
+"""
+
+"input": "we need to write query to fetch PC and Console users and suppress the Ultimate Users. finally apply 13 month promotional base"
+"Query": """
+//Fetching PC and Console users
+PC_Console_Users =  SELECT DISTINCT UserPassportPuid AS Puid, SubscriptionType
+                FROM GamePass
+                WHERE SubscriptionType == "PC"  OR SubscriptionType == "pass"
+                AND (EndDate >= DateTime.Now.AddDays( + 1) OR (EndDate >= DateTime.Now.AddDays( - 2) AND IsAutoRenew == true));
+                
+//Creating base of ultimate users for suppression               
+UltimateUsers =  SELECT DISTINCT UserPassportPuid AS Puid, SubscriptionType
+                FROM GamePass
+                WHERE SubscriptionType == "Ultimate"  
+                AND (EndDate >= DateTime.Now.AddDays( + 1) OR (EndDate >= DateTime.Now.AddDays( - 2) AND IsAutoRenew == true));
+
+//Suppressing the ultimate users 
+Excl_Ultimate_Users = SELECT DISTINCT UserPassportPuid AS Puid, SubscriptionType
+                FROM PC_Console_Users AS p
+		LEFT JOIN UltimateUsers AS U
+                ON U.Puid == P.Puid
+		WHERE U.Puid IS NULL;
+
+//In last we need to find common user between the above final user with Initial template. In this particular example Query it ask to apply 13 month promotional template if they ask to apply PC Promotional then will apply PC Promotional template
+    InitialTemplate =
+    SELECT A.*
+    FROM Promotional13M AS A
+    INNER JOIN Excl_Ultimate_Users AS E
+    ON A.Puid == E.Puid
+    WHERE A.AccountCreatedDate <= DateTime.Now.Date.AddDays(-7); this 7 days criteria is applied for each promotional criteria but not for transactional Criteria.
+"""
+'''
